@@ -1,5 +1,5 @@
 # Testing-Randomization-Assumption-Clustering-Based-Approach
-This is an implementation of clustering approach for testing randomization assumption
+This is an implementation of clustering approach for testing randomization assumption: https://arxiv.org/abs/2107.00815
 
 # Example
 ```python
