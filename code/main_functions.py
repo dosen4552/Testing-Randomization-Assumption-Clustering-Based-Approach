@@ -8,14 +8,11 @@ Created on Fri Oct 15 14:58:41 2021
 import random
 import numpy as np
 from pandas import read_csv
-from metric_learn import MMC
-from metric_learn import SDML
-from metric_learn import ITML
 import scipy
-#import pandas as pd
-#import time
+import cvxpy as cp
+import time
+import pandas as pd
 
-# The main functions are modified from https://github.com/Behrouz-Babaki/COP-Kmeans
 
 def cop_kmeans(dataset, k,B, ml=[], cl=[],
                initialization='kmpp',
@@ -56,63 +53,13 @@ def cop_kmeans(dataset, k,B, ml=[], cl=[],
     return clusters_, centers_
 
 
-def cop_kmeans_with_metric(dataset, k, ml=[], cl=[], 
-               initialization='kmpp', 
-               max_iter=300, tol=1e-4):
-    
-    p = np.shape(dataset)[1]
-    B = np.identity(p)
-    
-    ml, cl = transitive_closure(ml, cl, len(dataset))
-    ml_info = get_ml_info(ml, dataset, B)
-    tol = tolerance(tol, dataset)
-
-    centers = initialize_centers(dataset, k, initialization, B)
-    
-
-    for _ in range(max_iter):
-        clusters_ = [-1] * len(dataset)
-        for i, d in enumerate(dataset):
-            indices, _ = closest_clusters(centers, d, B)
-            counter = 0
-            if clusters_[i] == -1:
-                found_cluster = False
-                while (not found_cluster) and counter < len(indices):
-                    index = indices[counter]
-                    if not violate_constraints(i, index, clusters_, ml, cl):
-                        found_cluster = True
-                        clusters_[i] = index
-                        for j in ml[i]:
-                            clusters_[j] = index
-                    counter += 1
-
-                if not found_cluster:
-                    return None, None, None
-              
-        try:
-            B = metric_learner(dataset,clusters_,centers,algorithm = 'MMC')
-        except:
-            B = B
-        clusters_, centers_ = compute_centers(clusters_, dataset, k, ml_info, B) 
-
-        
-        shift = sum(l2_distance(centers[i], centers_[i], B) for i in range(k))
-        if shift <= tol:
-            break
-
-        centers = centers_
-        
-
-    return clusters_, centers_, B
-
-
-
-def l2_distance(point1,point2, A):
+def l2_distance(point1,point2, A ):
     point1 = np.copy(np.array(point1))
     point2 = np.copy(np.array(point2))
     return np.dot(np.dot(point1-point2,A), (point1-point2).T ) 
 
 
+# taken from scikit-learn (https://goo.gl/1RYPP5)
 def violate_constraints(data_index, cluster_index, clusters, ml, cl):
     for i in ml[data_index]:
         if clusters[i] != -1 and clusters[i] != cluster_index:
@@ -287,50 +234,45 @@ def link_constraint(data):
     return cannot_link
 
 
-def data_transformer(dataset, clusters, centers):
-    n, p = np.shape(dataset)
-    control = dataset[np.array(clusters) == 0,]
-    treatment = dataset[np.array(clusters) == 1,]
-    dissimilar = np.copy(dataset)
-    #dissimilar = np.zeros((2*n, p))
-    similar = np.zeros((2*n, p))
-    for i in range(int(n/2)):
-        similar[2*i,] = control[i,]
-        similar[2*i + 1,] = centers[0]
-    for i in np.arange(int(n/2),n,1):
-        similar[2*i,] = treatment[i - int(n/2),]
-        similar[2*i + 1,] = centers[1]
-        
 
-    
-    data = np.vstack((dissimilar,similar)).reshape(( int(n/2) + n , 2 , p) )
-    similar_pairs =  np.ones(n)
-    dissimilar_pairs = -1* np.ones(int(n/2))
-    pair_indicator = np.hstack((dissimilar_pairs,similar_pairs))
-    return data, pair_indicator
+def diff_data_process(data):
+    n, p = data.shape
+    diff_data = [data[0,:] - data[1,:]]
+    for i in np.arange(1,int(n/2),1):
+        diff_data = np.r_[diff_data, [data[2*i,:] - data[2*i + 1,:]]]
+    return diff_data
 
-def metric_learner(dataset,clusters,centers,algorithm = 'MMC',diagonal = True):
-    # Metric learner based on MMC. SDML or ITML algorithm with default algorithm MMC
-    data, pair_indicator = data_transformer(dataset, clusters, centers)
-        
-    if algorithm == 'MMC':
-       mmc = MMC(diagonal=diagonal)
-       mmc.fit(data, pair_indicator)
-       target_matrix = mmc.A_
-    elif algorithm == 'SDML':
-         mmc = SDML()
-         mmc.fit(data, pair_indicator)
-         target_matrix = mmc.components_
-    elif algorithm == 'ITML':
-         mmc = ITML()
-         mmc.fit(data, pair_indicator)
-         target_matrix = mmc.components_
+
+def metric_learning(diff_data, diag = True):
+    n, p = diff_data.shape
+    if diag == True:
+        X = cp.Variable((p,p), diag=True)
     else:
-         print('Error, no such algorithm.')
-         target_matrix = np.nan
-    return target_matrix
+        X = cp.Variable((p,p), symmetric=True)
+    constraints = [X >> 0]
+    constraints += [cp.pnorm(X, p = 2) <= 1]
+    prob = cp.Problem(cp.Minimize(-cp.trace(diff_data @ X @ diff_data.transpose())),
+                  constraints)
+    prob.solve()
+    
+    if diag == True:
+        return np.diag( ((X.value).data)[0])
+    else:
+        return X.value
+    
+def cop_kmeans_metric_learning(dataset, learn = True, diag = True):
+    n, p = dataset.shape
+    if learn == False:
+        B = np.identity(p)
+    else:
+        diff_data = diff_data_process(dataset)
+        B = metric_learning(diff_data, diag = diag)
+    
+    cannot_link = link_constraint(dataset)
+    clusters, centers = cop_kmeans(dataset=dataset, k=2, B = B,  ml=[],cl=cannot_link, initialization='kmpp',max_iter=1000,tol=1e-4)
+    return clusters, centers, B
 
-
+################################################### Analysis function ##################################################################
 
 def p_value_calculation_z(accuracy, matched_dataset, alpha = 0.05, Gamma = 1):
     # Conduct right-tailed test
@@ -350,37 +292,7 @@ def p_value_calculation_b(accuracy, matched_dataset, alpha = 0.05, Gamma = 1):
        print('Reject the null. The assumption does not hold.')
     else:
        print("Fail to reject the null. The assumption holds.") 
-
-
-def mean_difference(matched_data,original_data,true_label,original_label):
-    true_label = np.array(true_label)
-    treatment_mean = np.mean(matched_data[true_label == 1],axis = 0)
-    control_mean = np.mean(matched_data[true_label == 0], axis = 0)
-    treatment_var = np.var(original_data[original_label == 1],axis = 0)
-    control_var = np.var(original_data[original_label == 0], axis = 0)
-    return abs(treatment_mean - control_mean)/np.sqrt((treatment_var 
-                                                      + control_var) / 2), np.mean(( abs(treatment_mean 
-                                                                                        - control_mean)/np.sqrt( (treatment_var + control_var) / 2) ))
-    
-
-def cop_kmeans_outer_loop(dataset, no_iter = 2):
-    
-    n,p = np.shape(dataset)
-    B = np.identity(p)
-    cannot_link = link_constraint(dataset)
-    
-    for i in range(no_iter):
-        clusters, centers = cop_kmeans(dataset=dataset, k=2, B = B,  ml=[],cl=cannot_link, initialization='deterministic',max_iter=2000,tol=1e-4)
-        if i == (no_iter - 1):
-           break                                                                                     
-        try:
-            B = metric_learner(dataset,clusters,centers,algorithm = 'MMC',diagonal = True)
-        except:
-            B = B                                                                              
-
-    return clusters,centers,B
-
-
+       
 def calculate_Gamma(accuracy, matched_dataset, alpha = 0.05):
     n_t = int(np.shape(matched_dataset)[0]/2)
     k = n_t * accuracy
@@ -388,60 +300,26 @@ def calculate_Gamma(accuracy, matched_dataset, alpha = 0.05):
     
         if k >= scipy.stats.binom.ppf(alpha/2, n_t, Gamma/(1+Gamma)) and k <= scipy.stats.binom.ppf(1 - alpha/2, n_t, Gamma/(1+Gamma)):
            return Gamma
-    
 
+################################################### Example ###########################################################################
 
-
-############################################## Test functions #############################################################
-
-def main_test_level(p = 10, n = 500, alpha = 0.05, level = 10000):
-    # Test Level
-    count = 0
-    for i in range(level):
-        data = np.random.normal(0,1,[n,p])
-        true_label = np.array([0,1] * int(n/2))
-        cannot_link = link_constraint(data)
-        
-        clusters, centers, B = cop_kmeans_with_metric(dataset=data, k=2, ml=[],cl=cannot_link,initialization='deterministic',max_iter=1000,tol=1e-4)
-        accuracy_null = sum(true_label == clusters)/np.shape(data)[0]
-        p_value_null = p_value_calculation_z(accuracy_null, data, alpha = 0.05, Gamma = 1)
-        if p_value_null < alpha :
-           count += 1
-        print("Current number is",i)
-        print("Current accuracy is",accuracy_null)
-        print("Current p value is",p_value_null)
-        print("Number of rejection is",count)
-        print("Current level is",count/(i+1))
-        
-    print("Overall level is",count/level)
-
-def main_test_real_data(real_data, true_label,Gamma = 1):
-    cannot_link = link_constraint(real_data)
-    n, p = np.shape(real_data)
-    clusters, centers, B = cop_kmeans_with_metric(dataset=real_data, k=2, ml=[],cl=cannot_link,initialization='kmpp',max_iter=4000)
-    #clusters, centers, B = cop_kmeans_outer_loop(real_data, no_iter = 2)
-    accuracy = sum(true_label == clusters)/n
-    p_value_calculation_b(accuracy, real_data, alpha = 0.05, Gamma = Gamma)
-    print("Accuracy is", accuracy)
-    #print("P value is", p_value)
-    return accuracy, clusters
-
-
-
-#########################################  Run Real Data #################################################################
-
-random.seed(9)
-
-# Test real dataset (bio data)
 
 testing_data2 = read_csv("C:\\Users\\chenk\\Dropbox\\Matching and Semi-Supervised Learning\\real data all\\pscore_match_bio.csv")
 testing_data2 = testing_data2.sort_values(by=['matched_set'])
 testing_data2.to_csv("C:\\Users\\chenk\\Dropbox\\Matching and Semi-Supervised Learning\\real data all\\pscore_match_bio_after_rank.csv")
-real_data2 = ((testing_data2.values)[:,0:10]).astype(float)
-true_label =  ((testing_data2.values)[:,11]).astype(float)
-accuracy, clusters = main_test_real_data(real_data2, true_label, Gamma = 1)
-print("P-value is ", p_value_calculation_z(accuracy, real_data2, alpha = 0.05, Gamma = 1))
-print("Corresponding Gamma is ",calculate_Gamma(accuracy, real_data2, alpha = 0.05))
+test_data = ((testing_data2.values)[:,0:10]).astype(float)
+label =  ((testing_data2.values)[:,11]).astype(float)
+n,p = test_data.shape
+
+clusters, centers, B = cop_kmeans_metric_learning(dataset = test_data, learn = True, diag = True)
+
+accuracy = sum(label == clusters)/n
+print("Accuracy is", accuracy)
+print("P-value is ", p_value_calculation_z(accuracy, test_data, alpha = 0.05, Gamma = 1))
+print("Corresponding Gamma is ",calculate_Gamma(accuracy, test_data, alpha = 0.05))
+
+
+
 
 
 
