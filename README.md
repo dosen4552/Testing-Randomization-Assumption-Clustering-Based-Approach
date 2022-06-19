@@ -14,7 +14,7 @@ true_label =  ((testing_data.values)[:,11]).astype(float)
 
 # Run constrained K-means clustering
 clusters, centers, B = cop_kmeans_metric_learning(dataset = test_data, learn = True, diag = True)
-accuracy = sum(label == clusters)/n
+accuracy = sum(true_label == clusters)/n
 print("Accuracy is", accuracy)
 print("P-value is ", p_value_calculation_z(accuracy, test_data, alpha = 0.05, Gamma = 1))
 print("Corresponding Gamma is ",calculate_Gamma(accuracy, test_data, alpha = 0.05))
