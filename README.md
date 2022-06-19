@@ -12,7 +12,7 @@ real_data = ((testing_data.values)[:,0:10]).astype(float)
 true_label =  ((testing_data.values)[:,11]).astype(float)
 
 
-# Run contrained K-means clustering
+# Run constrained K-means clustering
 clusters, centers, B = cop_kmeans_metric_learning(dataset = test_data, learn = True, diag = True)
 accuracy = sum(label == clusters)/n
 print("Accuracy is", accuracy)
