@@ -38,3 +38,5 @@ print("Corresponding Gamma is ",calculate_Gamma(accuracy, test_data, alpha = 0.0
 4.) Guns, Tias, Christel Vrain, and Khanh-Chuong Duong. "Repetitive branch-and-bound using constraint programming for constrained minimum sum-of-squares clustering." 22nd European Conference on Artificial Intelligence. 2016.
 
 5.) metric-learn: Metric Learning Algorithms in Python, de Vazelhes et al., Journal of Machine Learning Research, 21(138):1-6, 2020.
+
+6.) Pedregosa, F., Varoquaux, G., Gramfort, A., Michel, V., Thirion, B., Grisel, O., ... & Duchesnay, E. (2011). Scikit-learn: Machine learning in Python. the Journal of machine Learning research, 12, 2825-2830.
